@@ -1,0 +1,33 @@
+version: 2
+before:
+  hooks:
+    - cargo fetch
+builds:
+  - id: ssht
+    builder: rust
+    binary: ssht
+    env:
+      - CARGO_TERM_COLOR=always
+    flags:
+      - --locked
+    targets:
+      - aarch64-apple-darwin
+      - x86_64-apple-darwin
+      - x86_64-unknown-linux-gnu
+      - aarch64-unknown-linux-gnu
+      - x86_64-pc-windows-msvc
+archives:
+  - id: ssht
+    builds:
+      - ssht
+    format: zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Target }}"
+    files:
+      - LICENSE*
+      - README.md
+      - config.toml.example
+checksum:
+  name_template: "{{ .ProjectName }}_checksums.txt"
+changelog:
+  use: git
+

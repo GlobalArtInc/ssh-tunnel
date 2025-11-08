@@ -1,0 +1,10 @@
+[namespaces.office]
+ssh_user = "root"
+ssh_host = "10.0.0.151"
+ssh_port = 22
+target_ip = "10.0.0.151"
+forwards = [
+    { local = 6443, remote = 6443 },
+    { local = 80, remote = 80 }
+]
+
