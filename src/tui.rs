@@ -1,4 +1,4 @@
-use crate::connection::{ConnectionStatus, ForwardBinding, StatusEvent};
+use crate::connection::{ConnectionStatus, StatusEvent};
 use crate::shutdown::Shutdown;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
@@ -75,18 +75,22 @@ fn run_loop(
                     Constraint::Length(24),
                     Constraint::Length(16),
                     Constraint::Length(8),
-                    Constraint::Length(20),
+                    Constraint::Length(28),
                     Constraint::Min(10),
                 ];
                 let rows = state.entries.iter().map(|(name, entry)| {
                     let (text, color) = status_view(&entry.status);
+                    let ports_text = entry.ports.join("\n");
+                    let lines = entry.ports.len().max(1);
+                    let height = (lines.min(u16::MAX as usize)) as u16;
                     Row::new(vec![
                         Cell::from(name.clone()),
                         Cell::from(text).style(Style::default().fg(color)),
                         Cell::from(entry.attempt.to_string()),
-                        Cell::from(entry.ports.clone()),
+                        Cell::from(ports_text),
                         Cell::from(entry.message.clone().unwrap_or_default()),
                     ])
+                    .height(height)
                 });
                 let table = Table::new(rows, widths)
                     .header(header)
@@ -155,7 +159,7 @@ struct UiEntry {
     status: ConnectionStatus,
     attempt: u32,
     message: Option<String>,
-    ports: String,
+    ports: Vec<String>,
 }
 
 fn status_view(status: &ConnectionStatus) -> (&'static str, Color) {
@@ -168,13 +172,9 @@ fn status_view(status: &ConnectionStatus) -> (&'static str, Color) {
     }
 }
 
-fn format_ports(forwards: &[ForwardBinding]) -> String {
+fn format_ports(forwards: &[String]) -> Vec<String> {
     if forwards.is_empty() {
-        return String::from("-");
+        return vec![String::from("-")];
     }
-    forwards
-        .iter()
-        .map(|forward| format!("{} -> {}", forward.local, forward.remote))
-        .collect::<Vec<_>>()
-        .join(", ")
+    forwards.to_vec()
 }

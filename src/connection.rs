@@ -18,18 +18,12 @@ pub enum ConnectionStatus {
 }
 
 #[derive(Debug, Clone)]
-pub struct ForwardBinding {
-    pub local: u16,
-    pub remote: u16,
-}
-
-#[derive(Debug, Clone)]
 pub struct StatusEvent {
     pub namespace: String,
     pub status: ConnectionStatus,
     pub attempt: u32,
     pub message: Option<String>,
-    pub forwards: Vec<ForwardBinding>,
+    pub forwards: Vec<String>,
 }
 
 impl StatusEvent {
@@ -38,7 +32,7 @@ impl StatusEvent {
         status: ConnectionStatus,
         attempt: u32,
         message: Option<String>,
-        forwards: &[ForwardBinding],
+        forwards: &[String],
     ) -> Self {
         Self {
             namespace,
@@ -59,13 +53,10 @@ pub async fn run_namespace(
     let mut attempt: u32 = 0;
     let mut backoff = Duration::from_secs(1);
     let max_backoff = Duration::from_secs(30);
-    let forwards_view: Vec<ForwardBinding> = spec
+    let forwards_view: Vec<String> = spec
         .forwards
         .iter()
-        .map(|forward| ForwardBinding {
-            local: forward.local,
-            remote: forward.remote,
-        })
+        .map(|forward| format!("{} -> {}:{}", forward.local, spec.target_ip, forward.remote))
         .collect();
     loop {
         if shutdown.is_triggered() {
