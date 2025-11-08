@@ -1,73 +1,102 @@
-use serde::Deserialize;
-use std::collections::HashMap;
+mod config;
+mod connection;
+mod shutdown;
+mod tui;
+
+use anyhow::{anyhow, Result};
+use connection::{run_namespace, StatusEvent};
+use shutdown::Shutdown;
 use std::env;
-use std::fs;
-use std::io::{self, Write};
 use std::path::PathBuf;
-use std::process::Command;
+use std::sync::mpsc::Sender;
 
-#[derive(Deserialize)]
-struct Config {
-    namespaces: HashMap<String, Namespace>,
-}
-
-#[derive(Deserialize)]
-struct Namespace {
-    ssh_user: String,
-    ssh_host: String,
-    ssh_port: u16,
-    target_ip: String,
-    forwards: Vec<Forward>,
-}
-
-#[derive(Deserialize)]
-struct Forward {
-    local: u16,
-    remote: u16,
-}
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        return Err("at least one namespace must be specified".into());
+#[tokio::main]
+async fn main() -> Result<()> {
+    let cli = parse_args()?;
+    let config = config::Config::load(cli.config_path)?;
+    let namespaces = config.select_namespaces(&cli.namespaces)?;
+    let (event_tx, event_rx) = std::sync::mpsc::channel::<StatusEvent>();
+    let shutdown = Shutdown::new();
+    let ui_shutdown = shutdown.clone();
+    let ui_handle = std::thread::spawn(move || tui::run(event_rx, ui_shutdown));
+    let mut tasks = Vec::new();
+    for (name, namespace) in namespaces {
+        let sender = event_tx.clone();
+        let shutdown_token = shutdown.clone();
+        tasks.push(tokio::spawn(async move {
+            spawn_namespace(name, namespace, sender, shutdown_token).await
+        }));
     }
-    let path = resolve_config_path()?;
-    let raw = fs::read_to_string(&path)?;
-    let config: Config = toml::from_str(&raw)?;
-    for ns in &args[1..] {
-        let data = config
-            .namespaces
-            .get(ns)
-            .ok_or_else(|| format!("no such namespace: {}", ns))?;
-        let mut cmd = Command::new("ssh");
-        cmd.arg("-N");
-        for f in &data.forwards {
-            let binding = format!("{}:{}:{}", f.local, data.target_ip, f.remote);
-            cmd.arg("-L").arg(binding);
+    drop(event_tx);
+    let ctrl_c_shutdown = shutdown.clone();
+    let ctrl_c_task = tokio::spawn(async move {
+        let _ = tokio::signal::ctrl_c().await;
+        ctrl_c_shutdown.trigger();
+    });
+    for task in tasks {
+        match task.await {
+            Ok(result) => {
+                if let Err(err) = result {
+                    return Err(err);
+                }
+            }
+            Err(err) => {
+                return Err(anyhow!(err));
+            }
         }
-        cmd.arg("-p")
-            .arg(data.ssh_port.to_string())
-            .arg(format!("{}@{}", data.ssh_user, data.ssh_host));
-        println!("tunnels for namespace {} are configuring", ns);
-        io::stdout().flush()?;
-        let status = cmd.status()?;
-        if !status.success() {
-            return Err(format!("error while starting namespace: {}", ns).into());
-        }
-        println!("tunnels for namespace {} are active", ns);
+    }
+    if !shutdown.is_triggered() {
+        shutdown.trigger();
+    }
+    if !ctrl_c_task.is_finished() {
+        ctrl_c_task.abort();
+    }
+    match ctrl_c_task.await {
+        Ok(_) => {}
+        Err(err) if err.is_cancelled() => {}
+        Err(err) => return Err(anyhow!(err)),
+    }
+    match ui_handle.join() {
+        Ok(result) => result?,
+        Err(_) => return Err(anyhow!("TUI panicked")),
     }
     Ok(())
 }
 
-fn resolve_config_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let home = env::var("HOME")
-        .map(PathBuf::from)
-        .map_err(|_| -> Box<dyn std::error::Error> { "cannot determine home directory".into() })?;
-    let dir = home.join(".config/ssht");
-    if !dir.exists() {
-        fs::create_dir_all(&dir)?;
-    }
-    let path = dir.join("config.toml");
+async fn spawn_namespace(
+    name: String,
+    namespace: config::Namespace,
+    sender: Sender<StatusEvent>,
+    shutdown: Shutdown,
+) -> Result<()> {
+    run_namespace(name.clone(), namespace, sender.clone(), shutdown).await
+}
 
-    Ok(path)
+struct CliArgs {
+    config_path: Option<PathBuf>,
+    namespaces: Vec<String>,
+}
+
+fn parse_args() -> Result<CliArgs> {
+    let mut iter = env::args().skip(1);
+    let mut config_path = None;
+    let mut namespaces = Vec::new();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--config" => {
+                let next = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--config requires a path argument"))?;
+                config_path = Some(PathBuf::from(next));
+            }
+            value => namespaces.push(value.to_string()),
+        }
+    }
+    if namespaces.is_empty() {
+        return Err(anyhow!("at least one namespace is required"));
+    }
+    Ok(CliArgs {
+        config_path,
+        namespaces,
+    })
 }

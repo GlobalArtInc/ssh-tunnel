@@ -4,7 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0"
+crossterm = "0.28"
 dirs = "6.0.0"
+ratatui = { version = "0.26", default-features = false, features = ["crossterm"] }
 serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "signal", "sync", "time"] }
 toml = "0.8"
 
