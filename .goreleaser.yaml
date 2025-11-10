@@ -10,6 +10,7 @@ builds:
       - CARGO_TERM_COLOR=always
     flags:
       - --locked
+      - --release
     targets:
       - aarch64-apple-darwin
       - x86_64-apple-darwin
