@@ -83,6 +83,7 @@ pub async fn run_namespace(
         cmd.arg("-o").arg("ServerAliveInterval=30");
         cmd.arg("-o").arg("ServerAliveCountMax=3");
         cmd.arg("-o").arg("BatchMode=yes");
+        cmd.arg("-o").arg("StrictHostKeyChecking=no");
         for forward in &spec.forwards {
             let binding = format!("{}:{}:{}", forward.local, spec.target_ip, forward.remote);
             cmd.arg("-L").arg(binding);
